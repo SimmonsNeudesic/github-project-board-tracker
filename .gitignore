@@ -205,3 +205,14 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Generated sample files
+sample_report.csv
+sample_report.md
+sample_report.xlsx
+
+# Generated report files
+project_board_report.*
+*_report.csv
+*_report.md
+*_report.xlsx
