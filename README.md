@@ -147,6 +147,22 @@ If custom fields don't exist, the script attempts to extract information from:
 - Labels (for Priority)
 - Assignees (for Risk_Owner)
 
+## Testing
+
+The repository includes unit tests and a demo script to verify functionality:
+
+### Run Unit Tests
+```bash
+python test_tracker.py
+```
+
+### Generate Sample Output
+```bash
+python demo.py
+```
+
+This generates sample CSV and Markdown files without requiring GitHub API access, useful for understanding the output format.
+
 ## Troubleshooting
 
 **Error: GitHub token is required**
