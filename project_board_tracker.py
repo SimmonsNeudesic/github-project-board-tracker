@@ -36,7 +36,6 @@ class GitHubProjectBoardTracker:
             'X-GitHub-Api-Version': '2022-11-28'
         }
         self.graphql_url = 'https://api.github.com/graphql'
-        self.rest_url = 'https://api.github.com/graphql'
     
     def fetch_project_board_issues(self, project_number: int) -> List[Dict[str, Any]]:
         """
