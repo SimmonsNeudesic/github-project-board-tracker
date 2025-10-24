@@ -5,7 +5,8 @@ A Python script that exports a full list of issues from a GitHub project board v
 ## Features
 
 - 📊 Export issues from GitHub Projects (V2)
-- 📝 Generate reports in multiple formats: Markdown, CSV, and Excel
+- � **Filter by GitHub search queries** - Use full GitHub search syntax to filter results
+- �📝 Generate reports in multiple formats: Markdown, CSV, and Excel
 - 🔍 Extract comprehensive issue information including:
   - ReqID, Title, Source (Discussion/Issue/PR)
   - Issue URL, Business Need, Acceptance Criteria
@@ -43,9 +44,14 @@ pip install -r requirements.txt
 
 ### Basic Usage
 
-Export to CSV (default):
+Export entire project to CSV (default):
 ```bash
 python project_board_tracker.py --owner myorg --project 1 --format csv
+```
+
+Export filtered by milestone to Excel:
+```bash
+python project_board_tracker.py --owner myorg --project 137 --filter 'milestone:"Release 1.10.5.8" -is:pr' --format excel --output report.xlsx
 ```
 
 Export to Markdown:
@@ -53,10 +59,45 @@ Export to Markdown:
 python project_board_tracker.py --owner myorg --project 1 --format markdown --output report.md
 ```
 
-Export to Excel:
+### Using Filters (Recommended)
+
+The `--filter` option supports full GitHub search query syntax, allowing you to export only the issues you care about:
+
+**Filter by milestone (exclude PRs):**
 ```bash
-python project_board_tracker.py --owner myorg --project 1 --format excel --output report.xlsx
+python project_board_tracker.py --owner neudesic --project 137 --filter 'milestone:"Release 1.11.0.0" -is:pr' --format excel --output release_report.xlsx
 ```
+
+**Filter by state and label:**
+```bash
+python project_board_tracker.py --owner myorg --project 1 --filter 'state:open label:bug' --format csv --output open_bugs.csv
+```
+
+**Filter by assignee:**
+```bash
+python project_board_tracker.py --owner myorg --project 1 --filter 'assignee:john state:open' --format markdown --output johns_tasks.md
+```
+
+**Complex filters:**
+```bash
+python project_board_tracker.py --owner myorg --project 1 --filter 'milestone:"Sprint 5" label:feature state:closed' --format excel --output completed_features.xlsx
+```
+
+### Supported Filter Syntax
+
+The filter supports all GitHub search query operators:
+- `milestone:"Release 1.10.5.8"` - Filter by milestone name
+- `state:open` or `state:closed` - Filter by issue state
+- `label:bug` or `label:"needs review"` - Filter by labels
+- `assignee:username` - Filter by assignee
+- `author:username` - Filter by author
+- `is:pr` or `is:issue` - Filter by type
+- `-is:pr` - Exclude pull requests
+- `-is:issue` - Exclude issues
+- `created:>2024-01-01` - Filter by date
+- Any combination of the above using spaces
+
+For more information on GitHub search syntax, see: [GitHub Search Documentation](https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests)
 
 ### Command-Line Options
 
@@ -65,6 +106,8 @@ Options:
   --owner OWNER         Repository owner (organization or user) [required]
   --repo REPO          Repository name (optional, for org-level projects)
   --project PROJECT    Project board number [required]
+  --filter FILTER      GitHub search query to filter items (e.g., 'milestone:"Release 1.10.5.8" -is:pr')
+  --view VIEW          Project view number (optional, deprecated - use --filter instead)
   --format FORMAT      Output format: csv, markdown, or excel (default: csv)
   --output OUTPUT      Output file path (default: project_board_report.[format])
   --token TOKEN        GitHub personal access token (or set GITHUB_TOKEN env variable)
