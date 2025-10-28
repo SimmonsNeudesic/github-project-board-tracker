@@ -11,76 +11,79 @@ from datetime import datetime
 
 
 def generate_sample_data():
-    """Generate sample issue data."""
+    """Generate sample issue data matching stakeholder requirements."""
     return [
         {
-            'ReqID': 'REQ-001',
-            'Title': 'Implement user authentication',
+            'Issue ID': 'REQ-001',
+            'Title': 'Add Azure AI Document Intelligence custom classifier pipeline',
             'Source': 'Issue',
-            'Issue_URL': 'https://github.com/example/repo/issues/1',
-            'Business_Need': 'Users need secure login to access the application',
-            'Acceptance_Criteria': 'Users can login with email/password; Session management implemented; Password reset functionality',
-            'Design_Artifact_URLs': 'https://figma.com/design-123',
-            'Test_Case_ID': 'TC-001',
-            'Test_Evidence_URL': 'https://testrail.com/evidence/1',
-            'PR_URL': 'https://github.com/example/repo/pull/45',
-            'Commit_SHA': 'a1b2c3d4e5f6',
+            'GitHub Issue URL': 'https://github.com/org/repo/issues/123',
+            'Business Need': 'Improve document routing accuracy for multi-form ingestion.',
+            'Acceptance Criteria': '≥95% routing accuracy on validation set; fallback to human review when <80%.',
+            'Design Artifact(s) URL': 'https://github.com/org/repo/docs/design/HLD-doc-intel-classifier.md',
+            'Test Case ID(s)': 'TC-101, TC-102',
+            'Test Evidence URL': 'https://github.com/org/repo/actions/runs/111',
+            'Linked PR(s) URL': 'https://github.com/org/repo/pull/456',
+            'Commit SHA(s)': 'a1b2c3d, e4f5g6h',
             'Status': 'In Progress',
             'Priority': 'High',
-            'Risk_Owner': 'john.doe',
-            'Approval_Product': 'Approved',
-            'Approval_QA_Lead': 'Pending',
-            'Approval_Sponsor': 'Approved',
-            'Release_Version': 'v1.2.0',
-            'Created_Date': '2024-01-15T10:30:00Z',
-            'Update_Date': '2024-01-20T14:22:00Z',
-            'Change_Log': 'Initial creation; Updated acceptance criteria'
+            'Risk': 'Medium',
+            'Owner': 'jdoe',
+            'Approvals: Product Owner': 'Pending',
+            'Approvals: QA Lead': 'Pending',
+            'Approvals: Exec Sponsor': 'N/A',
+            'Release Version': '2025.9',
+            'Created Date': '2025-09-18',
+            'Updated Date': '2025-09-18',
+            'Change Log': 'Initial capture from GitHub Issue #123.'
         },
         {
-            'ReqID': 'REQ-002',
+            'Issue ID': 'REQ-002',
             'Title': 'Add export to CSV feature',
             'Source': 'Issue',
-            'Issue_URL': 'https://github.com/example/repo/issues/2',
-            'Business_Need': 'Stakeholders need to export data for external reporting',
-            'Acceptance_Criteria': 'Export button in UI; All data columns included; UTF-8 encoding',
-            'Design_Artifact_URLs': '',
-            'Test_Case_ID': 'TC-002',
-            'Test_Evidence_URL': '',
-            'PR_URL': '',
-            'Commit_SHA': '',
+            'GitHub Issue URL': 'https://github.com/org/repo/issues/456',
+            'Business Need': 'Stakeholders need to export data for external reporting',
+            'Acceptance Criteria': 'Export button in UI; All data columns included; UTF-8 encoding',
+            'Design Artifact(s) URL': 'N/A',
+            'Test Case ID(s)': 'TC-201',
+            'Test Evidence URL': 'N/A',
+            'Linked PR(s) URL': 'N/A',
+            'Commit SHA(s)': 'N/A',
             'Status': 'Done',
             'Priority': 'Medium',
-            'Risk_Owner': 'jane.smith',
-            'Approval_Product': 'Approved',
-            'Approval_QA_Lead': 'Approved',
-            'Approval_Sponsor': 'Approved',
-            'Release_Version': 'v1.1.0',
-            'Created_Date': '2024-01-10T09:15:00Z',
-            'Update_Date': '2024-01-18T16:45:00Z',
-            'Change_Log': 'Initial creation; Completed implementation; QA approved'
+            'Risk': 'Low',
+            'Owner': 'jsmith',
+            'Approvals: Product Owner': 'Approved',
+            'Approvals: QA Lead': 'Approved',
+            'Approvals: Exec Sponsor': 'Approved',
+            'Release Version': '2025.6',
+            'Created Date': '2025-06-01',
+            'Updated Date': '2025-09-18',
+            'Change Log': 'Completed implementation; QA approved; Released in 2025.6'
         },
         {
-            'ReqID': 'REQ-003',
-            'Title': 'Fix performance issue in dashboard',
+            'Issue ID': 'REQ-003',
+            'Title': 'OpenAI-based summarization for extracted fields',
             'Source': 'Issue',
-            'Issue_URL': 'https://github.com/example/repo/issues/3',
-            'Business_Need': 'Dashboard loads too slowly affecting user experience',
-            'Acceptance_Criteria': 'Dashboard loads in under 2 seconds; No console errors; Mobile responsive',
-            'Design_Artifact_URLs': '',
-            'Test_Case_ID': 'TC-003',
-            'Test_Evidence_URL': 'https://testrail.com/evidence/3',
-            'PR_URL': 'https://github.com/example/repo/pull/52',
-            'Commit_SHA': 'f6e5d4c3b2a1',
-            'Status': 'In Review',
-            'Priority': 'Critical',
-            'Risk_Owner': 'bob.johnson',
-            'Approval_Product': 'Approved',
-            'Approval_QA_Lead': 'In Progress',
-            'Approval_Sponsor': 'Approved',
-            'Release_Version': 'v1.1.1',
-            'Created_Date': '2024-01-22T11:00:00Z',
-            'Update_Date': '2024-01-25T13:30:00Z',
-            'Change_Log': 'Initial creation; PR submitted for review'
+            'GitHub Issue URL': 'https://github.com/org/repo/issues/789',
+            'Business Need': 'Improve analyst throughput by generating claim-ready summaries.',
+            'Acceptance Criteria': 'Summaries meet template; human accept rate ≥ 90% on sample set.',
+            'Design Artifact(s) URL': 'https://github.com/org/repo/docs/design/HLD-summarization.md',
+            'Test Case ID(s)': 'TC-301, TC-302',
+            'Test Evidence URL': 'https://github.com/org/repo/actions/runs/333',
+            'Linked PR(s) URL': 'https://github.com/org/repo/pull/790',
+            'Commit SHA(s)': '99aa11b',
+            'Status': 'Done',
+            'Priority': 'High',
+            'Risk': 'Medium',
+            'Owner': 'mcollins',
+            'Approvals: Product Owner': 'Approved',
+            'Approvals: QA Lead': 'Approved',
+            'Approvals: Exec Sponsor': 'Approved',
+            'Release Version': '2025.6',
+            'Created Date': '2025-06-01',
+            'Updated Date': '2025-09-18',
+            'Change Log': 'Approved & released 2025.6.'
         }
     ]
 
@@ -90,12 +93,12 @@ def export_sample_csv():
     issues = generate_sample_data()
     
     fieldnames = [
-        'ReqID', 'Title', 'Source', 'Issue_URL', 'Business_Need',
-        'Acceptance_Criteria', 'Design_Artifact_URLs', 'Test_Case_ID',
-        'Test_Evidence_URL', 'PR_URL', 'Commit_SHA', 'Status', 'Priority',
-        'Risk_Owner', 'Approval_Product', 'Approval_QA_Lead',
-        'Approval_Sponsor', 'Release_Version', 'Created_Date',
-        'Update_Date', 'Change_Log'
+        'Issue ID', 'Title', 'Source', 'GitHub Issue URL', 'Business Need',
+        'Acceptance Criteria', 'Design Artifact(s) URL', 'Test Case ID(s)',
+        'Test Evidence URL', 'Linked PR(s) URL', 'Commit SHA(s)', 'Status', 'Priority',
+        'Risk', 'Owner', 'Approvals: Product Owner', 'Approvals: QA Lead',
+        'Approvals: Exec Sponsor', 'Release Version', 'Created Date',
+        'Updated Date', 'Change Log'
     ]
     
     output_file = 'sample_report.csv'
@@ -130,40 +133,44 @@ def export_sample_markdown():
         
         # Detailed table
         mdfile.write("## Detailed Issue List\n\n")
-        mdfile.write("| ReqID | Title | Source | Status | Priority | Created | Updated |\n")
-        mdfile.write("|-------|-------|--------|--------|----------|---------|----------|\n")
+        mdfile.write("| Issue ID | Title | Source | Status | Priority | Risk | Owner | Created | Updated |\n")
+        mdfile.write("|----------|-------|--------|--------|----------|------|-------|---------|----------|\n")
         
         for issue in issues:
-            req_id = str(issue.get('ReqID', ''))
-            title = issue.get('Title', '')
-            source = issue.get('Source', '')
-            status = issue.get('Status', '')
-            priority = issue.get('Priority', '')
-            created = issue.get('Created_Date', '')[:10] if issue.get('Created_Date') else ''
-            updated = issue.get('Update_Date', '')[:10] if issue.get('Update_Date') else ''
+            issue_id = str(issue.get('Issue ID', 'N/A'))
+            title = issue.get('Title', 'N/A')
+            source = issue.get('Source', 'N/A')
+            status = issue.get('Status', 'N/A')
+            priority = issue.get('Priority', 'N/A')
+            risk = issue.get('Risk', 'N/A')
+            owner = issue.get('Owner', 'N/A')
+            created = issue.get('Created Date', 'N/A')
+            updated = issue.get('Updated Date', 'N/A')
             
-            mdfile.write(f"| {req_id} | {title} | {source} | {status} | {priority} | {created} | {updated} |\n")
+            mdfile.write(f"| {issue_id} | {title} | {source} | {status} | {priority} | {risk} | {owner} | {created} | {updated} |\n")
         
         # Detailed sections
         mdfile.write("\n## Detailed Issue Information\n\n")
         for issue in issues:
-            mdfile.write(f"### {issue.get('ReqID', 'N/A')} - {issue.get('Title', 'Untitled')}\n\n")
+            mdfile.write(f"### {issue.get('Issue ID', 'N/A')} - {issue.get('Title', 'Untitled')}\n\n")
             mdfile.write(f"**Source:** {issue.get('Source', 'N/A')}\n\n")
-            mdfile.write(f"**URL:** {issue.get('Issue_URL', 'N/A')}\n\n")
+            mdfile.write(f"**URL:** {issue.get('GitHub Issue URL', 'N/A')}\n\n")
             mdfile.write(f"**Status:** {issue.get('Status', 'N/A')}\n\n")
             mdfile.write(f"**Priority:** {issue.get('Priority', 'N/A')}\n\n")
+            mdfile.write(f"**Risk:** {issue.get('Risk', 'N/A')}\n\n")
+            mdfile.write(f"**Owner:** {issue.get('Owner', 'N/A')}\n\n")
             
-            if issue.get('Business_Need'):
-                mdfile.write(f"**Business Need:** {issue.get('Business_Need')}\n\n")
+            if issue.get('Business Need') and issue.get('Business Need') != 'N/A':
+                mdfile.write(f"**Business Need:** {issue.get('Business Need')}\n\n")
             
-            if issue.get('Acceptance_Criteria'):
-                mdfile.write(f"**Acceptance Criteria:** {issue.get('Acceptance_Criteria')}\n\n")
+            if issue.get('Acceptance Criteria') and issue.get('Acceptance Criteria') != 'N/A':
+                mdfile.write(f"**Acceptance Criteria:** {issue.get('Acceptance Criteria')}\n\n")
             
-            if issue.get('PR_URL'):
-                mdfile.write(f"**Pull Request:** {issue.get('PR_URL')}\n\n")
+            if issue.get('Linked PR(s) URL') and issue.get('Linked PR(s) URL') != 'N/A':
+                mdfile.write(f"**Linked PR(s):** {issue.get('Linked PR(s) URL')}\n\n")
             
-            if issue.get('Commit_SHA'):
-                mdfile.write(f"**Commit SHA:** {issue.get('Commit_SHA')}\n\n")
+            if issue.get('Commit SHA(s)') and issue.get('Commit SHA(s)') != 'N/A':
+                mdfile.write(f"**Commit SHA(s):** {issue.get('Commit SHA(s)')}\n\n")
             
             mdfile.write("---\n\n")
     

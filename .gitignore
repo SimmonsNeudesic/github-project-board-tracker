@@ -224,3 +224,4 @@ project_board_report.*
 *_report.csv
 *_report.md
 *_report.xlsx
+.ai_cache/extractions.json
