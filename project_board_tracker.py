@@ -13,12 +13,14 @@ import csv
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import requests
+from field_extractor import AIFieldExtractor
 
 
 class GitHubProjectBoardTracker:
     """Fetch and export issues from GitHub project boards."""
     
-    def __init__(self, token: str, owner: str, repo: Optional[str] = None):
+    def __init__(self, token: str, owner: str, repo: Optional[str] = None, 
+                 ai_extractor: Optional[AIFieldExtractor] = None):
         """
         Initialize the tracker.
         
@@ -26,10 +28,12 @@ class GitHubProjectBoardTracker:
             token: GitHub personal access token
             owner: Repository owner (organization or user)
             repo: Repository name (optional, for org-level projects)
+            ai_extractor: Optional AI field extractor for --extract-from-body
         """
         self.token = token
         self.owner = owner
         self.repo = repo
+        self.ai_extractor = ai_extractor
         self.headers = {
             'Authorization': f'token {token}',
             'Accept': 'application/vnd.github.v3+json',
@@ -623,6 +627,41 @@ class GitHubProjectBoardTracker:
         
         return all_items
     
+    def _normalize_field_name(self, field_name: str) -> str:
+        """
+        Normalize field names to handle variations (spaces, underscores, case).
+        
+        Args:
+            field_name: Original field name from GitHub
+            
+        Returns:
+            Normalized field name (lowercase, underscores instead of spaces)
+        """
+        return field_name.lower().replace(' ', '_').replace('-', '_')
+    
+    def _get_field_value(self, field_values: Dict[str, Any], *field_names: str) -> str:
+        """
+        Get field value by trying multiple field name variations.
+        Returns 'N/A' if not found.
+        
+        Args:
+            field_values: Dictionary of field values
+            field_names: List of possible field names to try
+            
+        Returns:
+            Field value or 'N/A'
+        """
+        for name in field_names:
+            # Try exact match first
+            if name in field_values and field_values[name]:
+                return str(field_values[name])
+            # Try normalized match
+            normalized_name = self._normalize_field_name(name)
+            for key, value in field_values.items():
+                if self._normalize_field_name(key) == normalized_name and value:
+                    return str(value)
+        return 'N/A'
+    
     def _process_items(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Process raw project items into structured issue data.
@@ -641,32 +680,46 @@ class GitHubProjectBoardTracker:
                 # Draft issue
                 content = {'title': 'Draft Issue', 'url': '', 'state': 'Draft'}
             
-            # Extract custom field values
+            # Extract custom field values with normalization
             field_values = {}
+            field_values_normalized = {}
             for field_value in item.get('fieldValues', {}).get('nodes', []):
                 if not field_value:
                     continue
                 field_name = field_value.get('field', {}).get('name', '')
+                if not field_name:
+                    continue
+                
+                value = None
                 if 'text' in field_value:
-                    field_values[field_name] = field_value['text']
+                    value = field_value['text']
                 elif 'number' in field_value:
-                    field_values[field_name] = field_value['number']
+                    value = field_value['number']
                 elif 'date' in field_value:
-                    field_values[field_name] = field_value['date']
+                    value = field_value['date']
                 elif 'name' in field_value:
-                    field_values[field_name] = field_value['name']
+                    value = field_value['name']
+                
+                if value is not None and value != '':
+                    field_values[field_name] = value
+                    field_values_normalized[self._normalize_field_name(field_name)] = value
+                if value is not None and value != '':
+                    field_values[field_name] = value
+                    field_values_normalized[self._normalize_field_name(field_name)] = value
             
-            # Determine source type
+            # Determine source type (Issue or Discussion only, not Pull Request)
             source = 'Issue'
             if item.get('type') == 'DRAFT_ISSUE':
-                source = 'Draft'
+                source = 'Discussion'
             elif 'commits' in content:
-                source = 'Pull Request'
+                # This is a PR, but we'll mark source as Issue (the PR is linked to an issue)
+                source = 'Issue'
             
             # Extract commit SHA for PRs
-            commit_sha = ''
+            commit_shas = []
             if 'commits' in content and content['commits']['nodes']:
-                commit_sha = content['commits']['nodes'][0]['commit']['oid']
+                commit_shas = [content['commits']['nodes'][0]['commit']['oid'][:7]]  # Short SHA
+            commit_sha_str = ', '.join(commit_shas) if commit_shas else 'N/A'
             
             # Extract labels
             labels = []
@@ -678,29 +731,97 @@ class GitHubProjectBoardTracker:
             if 'assignees' in content and content['assignees']['nodes']:
                 assignees = [assignee['login'] for assignee in content['assignees']['nodes']]
             
-            # Build the issue record
+            # Get Issue ID (try ReqID, Req ID, Issue ID, or fall back to issue number)
+            issue_id = self._get_field_value(field_values, 'Issue ID', 'ReqID', 'Req ID', 'ID')
+            if issue_id == 'N/A' and content.get('number'):
+                issue_id = str(content.get('number'))
+            
+            # Get Owner (try Owner, Risk Owner, Assignees)
+            owner = self._get_field_value(field_values, 'Owner', 'Risk Owner')
+            if owner == 'N/A' and assignees:
+                owner = assignees[0]  # Use first assignee as owner
+            
+            # Get Risk (separate from Owner)
+            risk = self._get_field_value(field_values, 'Risk', 'Risk Level')
+            
+            # Get Priority (try field first, then labels)
+            priority = self._get_field_value(field_values, 'Priority', 'Priority Level')
+            if priority == 'N/A':
+                priority_label = self._get_priority_from_labels(labels)
+                if priority_label:
+                    priority = priority_label
+            
+            # Get Status (try field first, then state)
+            status = self._get_field_value(field_values, 'Status', 'State')
+            if status == 'N/A':
+                status = content.get('state', 'N/A')
+            
+            # Extract Business Need and Acceptance Criteria from issue body
+            business_need = self._get_field_value(field_values, 'Business Need', 'Business_Need')
+            if business_need == 'N/A':
+                business_need = self._extract_section(content.get('body', ''), 'Business Need') or 'N/A'
+            
+            acceptance_criteria = self._get_field_value(field_values, 'Acceptance Criteria', 'Acceptance_Criteria')
+            if acceptance_criteria == 'N/A':
+                acceptance_criteria = self._extract_section(content.get('body', ''), 'Acceptance Criteria') or 'N/A'
+            
+            # Try AI extraction for missing fields if enabled
+            ai_extracted = {}
+            if self.ai_extractor and content.get('number'):
+                # Identify which fields need extraction (have N/A values)
+                needs_extraction = (
+                    business_need == 'N/A' or
+                    acceptance_criteria == 'N/A' or
+                    self._get_field_value(field_values, 'Test Case ID(s)', 'Test Case IDs') == 'N/A' or
+                    self._get_field_value(field_values, 'Test Evidence URL', 'Test Evidence') == 'N/A' or
+                    self._get_field_value(field_values, 'Design Artifact(s) URL', 'Design Artifacts') == 'N/A' or
+                    risk == 'N/A' or
+                    self._get_field_value(field_values, 'Release Version', 'Release') == 'N/A' or
+                    self._get_field_value(field_values, 'Change Log', 'Changelog') == 'N/A'
+                )
+                
+                if needs_extraction:
+                    try:
+                        # Extract repository name from issue URL
+                        repo_name = self.repo
+                        if not repo_name and content.get('url'):
+                            # Parse from URL: https://github.com/owner/repo/issues/123
+                            url_parts = content['url'].split('/')
+                            if len(url_parts) >= 5:
+                                repo_name = url_parts[4]
+                        
+                        if repo_name:
+                            ai_extracted = self.ai_extractor.extract_fields(
+                                content, self.owner, repo_name
+                            )
+                    except Exception as e:
+                        print(f"  Warning: AI extraction failed for issue #{content.get('number')}: {e}")
+            
+            # Build the issue record with new column names
+            # Use AI-extracted values if field is N/A and AI found something
             issue_record = {
-                'ReqID': field_values.get('ReqID', content.get('number', '')),
-                'Title': content.get('title', ''),
+                'Issue ID': issue_id,
+                'Title': content.get('title', 'N/A'),
                 'Source': source,
-                'Issue_URL': content.get('url', ''),
-                'Business_Need': field_values.get('Business_Need', self._extract_section(content.get('body', ''), 'Business Need')),
-                'Acceptance_Criteria': field_values.get('Acceptance_Criteria', self._extract_section(content.get('body', ''), 'Acceptance Criteria')),
-                'Design_Artifact_URLs': field_values.get('Design_Artifact_URLs', ''),
-                'Test_Case_ID': field_values.get('Test_Case_ID', ''),
-                'Test_Evidence_URL': field_values.get('Test_Evidence_URL', ''),
-                'PR_URL': content.get('url', '') if source == 'Pull Request' else '',
-                'Commit_SHA': commit_sha,
-                'Status': field_values.get('Status', content.get('state', '')),
-                'Priority': field_values.get('Priority', self._get_priority_from_labels(labels)),
-                'Risk_Owner': field_values.get('Risk_Owner', ', '.join(assignees)),
-                'Approval_Product': field_values.get('Approval_Product', ''),
-                'Approval_QA_Lead': field_values.get('Approval_QA_Lead', ''),
-                'Approval_Sponsor': field_values.get('Approval_Sponsor', ''),
-                'Release_Version': field_values.get('Release_Version', ''),
-                'Created_Date': content.get('createdAt', ''),
-                'Update_Date': content.get('updatedAt', ''),
-                'Change_Log': field_values.get('Change_Log', '')
+                'GitHub Issue URL': content.get('url', 'N/A'),
+                'Business Need': ai_extracted.get('business_need', business_need),
+                'Acceptance Criteria': ai_extracted.get('acceptance_criteria', acceptance_criteria),
+                'Design Artifact(s) URL': ai_extracted.get('design_artifacts_url') or self._get_field_value(field_values, 'Design Artifact(s) URL', 'Design Artifacts', 'Design Artifact URLs', 'Design_Artifact_URLs'),
+                'Test Case ID(s)': ai_extracted.get('test_case_ids') or self._get_field_value(field_values, 'Test Case ID(s)', 'Test Case IDs', 'Test Case ID', 'Test_Case_ID'),
+                'Test Evidence URL': ai_extracted.get('test_evidence_url') or self._get_field_value(field_values, 'Test Evidence URL', 'Test Evidence', 'Test_Evidence_URL'),
+                'Linked PR(s) URL': content.get('url', 'N/A') if 'commits' in content else 'N/A',
+                'Commit SHA(s)': commit_sha_str,
+                'Status': status,
+                'Priority': priority,
+                'Risk': ai_extracted.get('risk', risk),
+                'Owner': owner,
+                'Approvals: Product Owner': self._get_field_value(field_values, 'Approvals: Product Owner', 'Approval Product', 'Approval_Product', 'Product Owner Approval'),
+                'Approvals: QA Lead': self._get_field_value(field_values, 'Approvals: QA Lead', 'Approval QA Lead', 'Approval_QA_Lead', 'QA Lead Approval'),
+                'Approvals: Exec Sponsor': self._get_field_value(field_values, 'Approvals: Exec Sponsor', 'Approval Sponsor', 'Approval_Sponsor', 'Exec Sponsor Approval'),
+                'Release Version': ai_extracted.get('release_version') or self._get_field_value(field_values, 'Release Version', 'Release', 'Version'),
+                'Created Date': content.get('createdAt', 'N/A')[:10] if content.get('createdAt') else 'N/A',
+                'Updated Date': content.get('updatedAt', 'N/A')[:10] if content.get('updatedAt') else 'N/A',
+                'Change Log': ai_extracted.get('change_log') or self._get_field_value(field_values, 'Change Log', 'Changelog', 'Change_Log')
             }
             
             processed_issues.append(issue_record)
@@ -729,8 +850,14 @@ class GitHubProjectBoardTracker:
     
     def _get_priority_from_labels(self, labels: List[str]) -> str:
         """Extract priority from labels."""
-        priority_labels = [label for label in labels if 'priority' in label.lower()]
-        return priority_labels[0] if priority_labels else ''
+        # Look for common priority patterns
+        priority_patterns = ['priority', 'p0', 'p1', 'p2', 'p3', 'high', 'medium', 'low', 'critical']
+        for label in labels:
+            label_lower = label.lower()
+            for pattern in priority_patterns:
+                if pattern in label_lower:
+                    return label
+        return 'N/A'
     
     def export_to_csv(self, issues: List[Dict[str, Any]], output_file: str):
         """
@@ -745,12 +872,12 @@ class GitHubProjectBoardTracker:
             return
         
         fieldnames = [
-            'ReqID', 'Title', 'Source', 'Issue_URL', 'Business_Need',
-            'Acceptance_Criteria', 'Design_Artifact_URLs', 'Test_Case_ID',
-            'Test_Evidence_URL', 'PR_URL', 'Commit_SHA', 'Status', 'Priority',
-            'Risk_Owner', 'Approval_Product', 'Approval_QA_Lead',
-            'Approval_Sponsor', 'Release_Version', 'Created_Date',
-            'Update_Date', 'Change_Log'
+            'Issue ID', 'Title', 'Source', 'GitHub Issue URL', 'Business Need',
+            'Acceptance Criteria', 'Design Artifact(s) URL', 'Test Case ID(s)',
+            'Test Evidence URL', 'Linked PR(s) URL', 'Commit SHA(s)', 'Status', 'Priority',
+            'Risk', 'Owner', 'Approvals: Product Owner', 'Approvals: QA Lead',
+            'Approvals: Exec Sponsor', 'Release Version', 'Created Date',
+            'Updated Date', 'Change Log'
         ]
         
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
@@ -790,40 +917,42 @@ class GitHubProjectBoardTracker:
             
             # Detailed table
             mdfile.write("## Detailed Issue List\n\n")
-            mdfile.write("| ReqID | Title | Source | Status | Priority | Created | Updated |\n")
-            mdfile.write("|-------|-------|--------|--------|----------|---------|----------|\n")
+            mdfile.write("| Issue ID | Title | Source | Status | Priority | Created | Updated |\n")
+            mdfile.write("|----------|-------|--------|--------|----------|---------|----------|\n")
             
             for issue in issues:
-                req_id = self._escape_markdown(str(issue.get('ReqID', '')))
-                title = self._escape_markdown(issue.get('Title', ''))
-                source = self._escape_markdown(issue.get('Source', ''))
-                status = self._escape_markdown(issue.get('Status', ''))
-                priority = self._escape_markdown(issue.get('Priority', ''))
-                created = issue.get('Created_Date', '')[:10] if issue.get('Created_Date') else ''
-                updated = issue.get('Update_Date', '')[:10] if issue.get('Update_Date') else ''
+                issue_id = self._escape_markdown(str(issue.get('Issue ID', 'N/A')))
+                title = self._escape_markdown(issue.get('Title', 'N/A'))
+                source = self._escape_markdown(issue.get('Source', 'N/A'))
+                status = self._escape_markdown(issue.get('Status', 'N/A'))
+                priority = self._escape_markdown(issue.get('Priority', 'N/A'))
+                created = issue.get('Created Date', 'N/A')
+                updated = issue.get('Updated Date', 'N/A')
                 
-                mdfile.write(f"| {req_id} | {title} | {source} | {status} | {priority} | {created} | {updated} |\n")
+                mdfile.write(f"| {issue_id} | {title} | {source} | {status} | {priority} | {created} | {updated} |\n")
             
             # Detailed sections
             mdfile.write("\n## Detailed Issue Information\n\n")
             for issue in issues:
-                mdfile.write(f"### {issue.get('ReqID', 'N/A')} - {issue.get('Title', 'Untitled')}\n\n")
+                mdfile.write(f"### {issue.get('Issue ID', 'N/A')} - {issue.get('Title', 'Untitled')}\n\n")
                 mdfile.write(f"**Source:** {issue.get('Source', 'N/A')}\n\n")
-                mdfile.write(f"**URL:** {issue.get('Issue_URL', 'N/A')}\n\n")
+                mdfile.write(f"**URL:** {issue.get('GitHub Issue URL', 'N/A')}\n\n")
                 mdfile.write(f"**Status:** {issue.get('Status', 'N/A')}\n\n")
                 mdfile.write(f"**Priority:** {issue.get('Priority', 'N/A')}\n\n")
+                mdfile.write(f"**Risk:** {issue.get('Risk', 'N/A')}\n\n")
+                mdfile.write(f"**Owner:** {issue.get('Owner', 'N/A')}\n\n")
                 
-                if issue.get('Business_Need'):
-                    mdfile.write(f"**Business Need:** {issue.get('Business_Need')}\n\n")
+                if issue.get('Business Need') and issue.get('Business Need') != 'N/A':
+                    mdfile.write(f"**Business Need:** {issue.get('Business Need')}\n\n")
                 
-                if issue.get('Acceptance_Criteria'):
-                    mdfile.write(f"**Acceptance Criteria:** {issue.get('Acceptance_Criteria')}\n\n")
+                if issue.get('Acceptance Criteria') and issue.get('Acceptance Criteria') != 'N/A':
+                    mdfile.write(f"**Acceptance Criteria:** {issue.get('Acceptance Criteria')}\n\n")
                 
-                if issue.get('PR_URL'):
-                    mdfile.write(f"**Pull Request:** {issue.get('PR_URL')}\n\n")
+                if issue.get('Linked PR(s) URL') and issue.get('Linked PR(s) URL') != 'N/A':
+                    mdfile.write(f"**Linked PR(s):** {issue.get('Linked PR(s) URL')}\n\n")
                 
-                if issue.get('Commit_SHA'):
-                    mdfile.write(f"**Commit SHA:** {issue.get('Commit_SHA')}\n\n")
+                if issue.get('Commit SHA(s)') and issue.get('Commit SHA(s)') != 'N/A':
+                    mdfile.write(f"**Commit SHA(s):** {issue.get('Commit SHA(s)')}\n\n")
                 
                 mdfile.write("---\n\n")
         
@@ -855,12 +984,12 @@ class GitHubProjectBoardTracker:
         
         # Define headers
         headers = [
-            'ReqID', 'Title', 'Source', 'Issue_URL', 'Business_Need',
-            'Acceptance_Criteria', 'Design_Artifact_URLs', 'Test_Case_ID',
-            'Test_Evidence_URL', 'PR_URL', 'Commit_SHA', 'Status', 'Priority',
-            'Risk_Owner', 'Approval_Product', 'Approval_QA_Lead',
-            'Approval_Sponsor', 'Release_Version', 'Created_Date',
-            'Update_Date', 'Change_Log'
+            'Issue ID', 'Title', 'Source', 'GitHub Issue URL', 'Business Need',
+            'Acceptance Criteria', 'Design Artifact(s) URL', 'Test Case ID(s)',
+            'Test Evidence URL', 'Linked PR(s) URL', 'Commit SHA(s)', 'Status', 'Priority',
+            'Risk', 'Owner', 'Approvals: Product Owner', 'Approvals: QA Lead',
+            'Approvals: Exec Sponsor', 'Release Version', 'Created Date',
+            'Updated Date', 'Change Log'
         ]
         
         # Style for header
@@ -966,6 +1095,31 @@ Environment Variables:
         help='GitHub personal access token (or set GITHUB_TOKEN environment variable)'
     )
     
+    # AI Extraction options
+    parser.add_argument(
+        '--extract-from-body',
+        action='store_true',
+        help='Extract missing fields from issue content using AI (Azure OpenAI)'
+    )
+    parser.add_argument(
+        '--azure-openai-endpoint',
+        help='Azure OpenAI endpoint URL (or set AZURE_OPENAI_ENDPOINT environment variable)'
+    )
+    parser.add_argument(
+        '--azure-openai-key',
+        help='Azure OpenAI API key (or set AZURE_OPENAI_API_KEY environment variable)'
+    )
+    parser.add_argument(
+        '--azure-deployment',
+        default='gpt-4.1-mini',
+        help='Azure OpenAI deployment name (default: gpt-4.1-mini)'
+    )
+    parser.add_argument(
+        '--cache-dir',
+        default='.ai_cache',
+        help='Directory for caching AI extractions (default: .ai_cache)'
+    )
+    
     args = parser.parse_args()
     
     # Get GitHub token
@@ -974,6 +1128,27 @@ Environment Variables:
         print("Error: GitHub token is required. Set GITHUB_TOKEN environment variable or use --token")
         sys.exit(1)
     
+    # Initialize AI extractor if requested
+    ai_extractor = None
+    if args.extract_from_body:
+        azure_endpoint = args.azure_openai_endpoint or os.environ.get('AZURE_OPENAI_ENDPOINT')
+        azure_key = args.azure_openai_key or os.environ.get('AZURE_OPENAI_API_KEY')
+        
+        if not azure_endpoint or not azure_key:
+            print("Error: Azure OpenAI credentials required for --extract-from-body")
+            print("  Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY environment variables")
+            print("  Or use --azure-openai-endpoint and --azure-openai-key arguments")
+            sys.exit(1)
+        
+        print(f"Initializing AI field extractor (deployment: {args.azure_deployment})...")
+        ai_extractor = AIFieldExtractor(
+            endpoint=azure_endpoint,
+            api_key=azure_key,
+            deployment=args.azure_deployment,
+            cache_dir=args.cache_dir,
+            github_token=token
+        )
+    
     # Determine output file
     if not args.output:
         extension = 'csv' if args.format == 'csv' else ('md' if args.format == 'markdown' else 'xlsx')
@@ -981,7 +1156,7 @@ Environment Variables:
     
     try:
         # Initialize tracker
-        tracker = GitHubProjectBoardTracker(token, args.owner, args.repo)
+        tracker = GitHubProjectBoardTracker(token, args.owner, args.repo, ai_extractor)
         
         # Fetch issues
         if args.filter:
