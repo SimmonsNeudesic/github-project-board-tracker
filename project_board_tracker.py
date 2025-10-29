@@ -20,7 +20,8 @@ class GitHubProjectBoardTracker:
     """Fetch and export issues from GitHub project boards."""
     
     def __init__(self, token: str, owner: str, repo: Optional[str] = None, 
-                 ai_extractor: Optional[AIFieldExtractor] = None):
+                 ai_extractor: Optional[AIFieldExtractor] = None,
+                 include_pr: bool = False):
         """
         Initialize the tracker.
         
@@ -29,11 +30,13 @@ class GitHubProjectBoardTracker:
             owner: Repository owner (organization or user)
             repo: Repository name (optional, for org-level projects)
             ai_extractor: Optional AI field extractor for --extract-from-body
+            include_pr: Whether to include PRs in report output
         """
         self.token = token
         self.owner = owner
         self.repo = repo
         self.ai_extractor = ai_extractor
+        self.include_pr = include_pr
         self.headers = {
             'Authorization': f'token {token}',
             'Accept': 'application/vnd.github.v3+json',
@@ -586,6 +589,11 @@ class GitHubProjectBoardTracker:
                           login
                         }
                       }
+                      closingIssuesReferences(first: 10) {
+                        nodes {
+                          number
+                        }
+                      }
                     }
                   }
                 }
@@ -662,9 +670,62 @@ class GitHubProjectBoardTracker:
                     return str(value)
         return 'N/A'
     
+    def _fetch_pr_reviews(self, pr_number: int, repo_owner: str, repo_name: str) -> Dict[str, Any]:
+        """
+        Fetch PR review approvals using GitHub REST API.
+        
+        Args:
+            pr_number: Pull request number
+            repo_owner: Repository owner
+            repo_name: Repository name
+            
+        Returns:
+            Dictionary with approvers and review states
+        """
+        reviews_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/pulls/{pr_number}/reviews'
+        
+        try:
+            response = requests.get(
+                reviews_url,
+                headers=self.headers,
+                timeout=30
+            )
+            response.raise_for_status()
+            reviews = response.json()
+            
+            # Extract unique approvers (users who approved)
+            approvers = []
+            seen_users = set()
+            
+            # Process reviews in reverse order (most recent first)
+            for review in reversed(reviews):
+                user = review.get('user', {}).get('login')
+                state = review.get('state')
+                
+                # Track most recent approval state per user
+                if user and user not in seen_users:
+                    seen_users.add(user)
+                    if state == 'APPROVED':
+                        approvers.append(user)
+            
+            return {
+                'approvers': approvers,
+                'approval_count': len(approvers),
+                'review_count': len(reviews)
+            }
+            
+        except Exception as e:
+            print(f"  Warning: Failed to fetch PR reviews for #{pr_number}: {e}")
+            return {
+                'approvers': [],
+                'approval_count': 0,
+                'review_count': 0
+            }
+    
     def _process_items(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Process raw project items into structured issue data.
+        Fetches PR approvals and matches them to related issues.
         
         Args:
             items: Raw items from GraphQL API
@@ -673,7 +734,41 @@ class GitHubProjectBoardTracker:
             Processed list of issues with standardized fields
         """
         processed_issues = []
+        pr_approvals_map = {}  # Maps issue number to list of approvers from PRs
         
+        # First pass: Process PRs to extract approval data
+        print("Processing pull requests for approval data...")
+        for item in items:
+            content = item.get('content')
+            if not content:
+                continue
+            
+            # Check if this is a PR
+            is_pr = 'closingIssuesReferences' in content
+            
+            if is_pr:
+                pr_number = content.get('number')
+                repo_info = content.get('repository', {})
+                repo_owner = repo_info.get('owner', {}).get('login')
+                repo_name = repo_info.get('name')
+                
+                if pr_number and repo_owner and repo_name:
+                    # Fetch PR reviews/approvals
+                    pr_reviews = self._fetch_pr_reviews(pr_number, repo_owner, repo_name)
+                    approvers = pr_reviews.get('approvers', [])
+                    
+                    # Map approvals to linked issues
+                    closing_issues = content.get('closingIssuesReferences', {}).get('nodes', [])
+                    for linked_issue in closing_issues:
+                        issue_num = linked_issue.get('number')
+                        if issue_num:
+                            if issue_num not in pr_approvals_map:
+                                pr_approvals_map[issue_num] = set()
+                            pr_approvals_map[issue_num].update(approvers)
+        
+        print(f"Found approval data for {len(pr_approvals_map)} issues from PRs")
+        
+        # Second pass: Process all items and build issue records
         for item in items:
             content = item.get('content')
             if not content:
@@ -707,13 +802,19 @@ class GitHubProjectBoardTracker:
                     field_values[field_name] = value
                     field_values_normalized[self._normalize_field_name(field_name)] = value
             
-            # Determine source type (Issue or Discussion only, not Pull Request)
+            # Check if this is a PR (has closingIssuesReferences)
+            is_pr = 'closingIssuesReferences' in content
+            
+            # Skip PRs unless include_pr flag is set
+            if is_pr and not self.include_pr:
+                continue
+            
+            # Determine source type (Issue, Discussion, or Pull Request)
             source = 'Issue'
             if item.get('type') == 'DRAFT_ISSUE':
                 source = 'Discussion'
-            elif 'commits' in content:
-                # This is a PR, but we'll mark source as Issue (the PR is linked to an issue)
-                source = 'Issue'
+            elif is_pr:
+                source = 'Pull Request'
             
             # Extract commit SHA for PRs
             commit_shas = []
@@ -797,6 +898,25 @@ class GitHubProjectBoardTracker:
                     except Exception as e:
                         print(f"  Warning: AI extraction failed for issue #{content.get('number')}: {e}")
             
+            # Get approval fields from project fields first
+            approval_po = self._get_field_value(field_values, 'Approvals: Product Owner', 'Approval Product', 'Approval_Product', 'Product Owner Approval')
+            approval_qa = self._get_field_value(field_values, 'Approvals: QA Lead', 'Approval QA Lead', 'Approval_QA_Lead', 'QA Lead Approval')
+            approval_exec = self._get_field_value(field_values, 'Approvals: Exec Sponsor', 'Approval Sponsor', 'Approval_Sponsor', 'Exec Sponsor Approval')
+            
+            # If issue has linked PRs with approvals, use those approvers
+            issue_number = content.get('number')
+            if issue_number and issue_number in pr_approvals_map:
+                pr_approvers = sorted(pr_approvals_map[issue_number])
+                approvers_str = ', '.join(pr_approvers)
+                
+                # Set approvals if not already filled in
+                if approval_po == 'N/A':
+                    approval_po = approvers_str
+                if approval_qa == 'N/A':
+                    approval_qa = approvers_str
+                if approval_exec == 'N/A':
+                    approval_exec = approvers_str
+            
             # Build the issue record with new column names
             # Use AI-extracted values if field is N/A and AI found something
             issue_record = {
@@ -809,15 +929,15 @@ class GitHubProjectBoardTracker:
                 'Design Artifact(s) URL': ai_extracted.get('design_artifacts_url') or self._get_field_value(field_values, 'Design Artifact(s) URL', 'Design Artifacts', 'Design Artifact URLs', 'Design_Artifact_URLs'),
                 'Test Case ID(s)': ai_extracted.get('test_case_ids') or self._get_field_value(field_values, 'Test Case ID(s)', 'Test Case IDs', 'Test Case ID', 'Test_Case_ID'),
                 'Test Evidence URL': ai_extracted.get('test_evidence_url') or self._get_field_value(field_values, 'Test Evidence URL', 'Test Evidence', 'Test_Evidence_URL'),
-                'Linked PR(s) URL': content.get('url', 'N/A') if 'commits' in content else 'N/A',
+                'Linked PR(s) URL': content.get('url', 'N/A') if is_pr else 'N/A',
                 'Commit SHA(s)': commit_sha_str,
                 'Status': status,
                 'Priority': priority,
                 'Risk': ai_extracted.get('risk', risk),
                 'Owner': owner,
-                'Approvals: Product Owner': self._get_field_value(field_values, 'Approvals: Product Owner', 'Approval Product', 'Approval_Product', 'Product Owner Approval'),
-                'Approvals: QA Lead': self._get_field_value(field_values, 'Approvals: QA Lead', 'Approval QA Lead', 'Approval_QA_Lead', 'QA Lead Approval'),
-                'Approvals: Exec Sponsor': self._get_field_value(field_values, 'Approvals: Exec Sponsor', 'Approval Sponsor', 'Approval_Sponsor', 'Exec Sponsor Approval'),
+                'Approvals: Product Owner': approval_po,
+                'Approvals: QA Lead': approval_qa,
+                'Approvals: Exec Sponsor': approval_exec,
                 'Release Version': ai_extracted.get('release_version') or self._get_field_value(field_values, 'Release Version', 'Release', 'Version'),
                 'Created Date': content.get('createdAt', 'N/A')[:10] if content.get('createdAt') else 'N/A',
                 'Updated Date': content.get('updatedAt', 'N/A')[:10] if content.get('updatedAt') else 'N/A',
@@ -1041,8 +1161,14 @@ Examples:
   # Export to CSV (entire project)
   python project_board_tracker.py --owner myorg --project 1 --format csv --output report.csv
 
-  # Export to Excel with filter (recommended)
-  python project_board_tracker.py --owner neudesic --project 137 --filter 'milestone:"Release 1.10.5.8" -is:pr' --format excel --output report.xlsx
+  # Export issues only (no PRs) with filter (recommended)
+  python project_board_tracker.py --owner neudesic --project 137 --filter 'milestone:"Release 1.10.5.8" is:issue' --format excel --output report.xlsx
+
+  # Export with PRs included to gather approval data, but exclude PRs from report
+  python project_board_tracker.py --owner neudesic --project 137 --filter 'milestone:"Release 1.10.5.8"' --format excel --output report.xlsx
+
+  # Export with PRs included in the report
+  python project_board_tracker.py --owner neudesic --project 137 --filter 'milestone:"Release 1.10.5.8"' --include-pr --format excel --output report.xlsx
 
   # Export with multiple filter criteria
   python project_board_tracker.py --owner myorg --project 1 --filter 'state:open label:bug assignee:john' --format markdown --output bugs.md
@@ -1079,6 +1205,11 @@ Environment Variables:
         '--filter',
         type=str,
         help='GitHub search query to filter items (e.g., \'milestone:"Release 1.10.5.8" -is:pr\')'
+    )
+    parser.add_argument(
+        '--include-pr',
+        action='store_true',
+        help='Include pull requests in the report output (default: exclude PRs from reports)'
     )
     parser.add_argument(
         '--format',
@@ -1146,7 +1277,9 @@ Environment Variables:
             api_key=azure_key,
             deployment=args.azure_deployment,
             cache_dir=args.cache_dir,
-            github_token=token
+            github_token=token,
+            owner=args.owner,
+            project=str(args.project)
         )
     
     # Determine output file
@@ -1156,7 +1289,7 @@ Environment Variables:
     
     try:
         # Initialize tracker
-        tracker = GitHubProjectBoardTracker(token, args.owner, args.repo, ai_extractor)
+        tracker = GitHubProjectBoardTracker(token, args.owner, args.repo, ai_extractor, args.include_pr)
         
         # Fetch issues
         if args.filter:

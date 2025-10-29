@@ -6,14 +6,17 @@ A Python script that exports a full list of issues from a GitHub project board v
 
 - 📊 Export issues from GitHub Projects (V2)
 - 🔎 **Filter by GitHub search queries** - Use full GitHub search syntax to filter results
+- 🔗 **Smart PR Approval Matching** - Automatically extracts PR approvers and matches them to linked issues
+- 🎯 **Flexible PR Handling** - PRs are excluded from reports by default but used to gather approval data
 - 🤖 **AI-Powered Field Extraction** - Extract missing fields from issue content using Azure OpenAI
+- 💾 **Per-Project Caching** - Separate cache files per organization/project to avoid conflicts
 - 📝 Generate reports in multiple formats: Markdown, CSV, and Excel
 - 🔍 Extract comprehensive issue information including:
-  - Issue ID, Title, Source (Discussion/Issue)
+  - Issue ID, Title, Source (Discussion/Issue/Pull Request)
   - GitHub Issue URL, Business Need, Acceptance Criteria
   - Design Artifact(s) URL, Test Case ID(s), Test Evidence URL
   - Linked PR(s) URL, Commit SHA(s), Status, Priority
-  - Risk, Owner, Approvals (Product Owner, QA Lead, Exec Sponsor)
+  - Risk, Owner, **Approvals with Approver Names** (Product Owner, QA Lead, Exec Sponsor)
   - Release Version, Dates, Change Log
 - 🎨 Beautiful formatted output with status summaries
 - 🔄 Flexible field mapping that handles variations in custom field names (spaces, underscores, case)
@@ -55,13 +58,69 @@ python project_board_tracker.py --owner myorg --project 1 --format csv
 
 Export filtered by milestone to Excel:
 ```bash
-python project_board_tracker.py --owner myorg --project 137 --filter 'milestone:"Release 1.10.5.8" -is:pr' --format excel --output report.xlsx
+python project_board_tracker.py --owner myorg --project 137 --filter 'milestone:"Release 1.10.5.8" is:issue' --format excel --output report.xlsx
+```
+
+Export with PR approval data (PRs filtered from report but used for approval matching):
+```bash
+python project_board_tracker.py --owner myorg --project 137 --filter 'milestone:"Release 1.10.5.8"' --format excel --output report.xlsx
+```
+
+Export including PRs in the report:
+```bash
+python project_board_tracker.py --owner myorg --project 137 --filter 'milestone:"Release 1.10.5.8"' --include-pr --format excel --output report.xlsx
 ```
 
 Export to Markdown:
 ```bash
 python project_board_tracker.py --owner myorg --project 1 --format markdown --output report.md
 ```
+
+### PR Approval Matching
+
+🔗 **New Feature!** The tracker now automatically fetches PR reviews and matches approvers to linked issues.
+
+**How it works:**
+
+1. When you run a query that includes PRs (without `is:issue` filter), the tracker fetches all PR reviews
+2. PR approvers are automatically extracted from GitHub review data
+3. PRs are matched to their linked issues using GitHub's `closingIssuesReferences`
+4. Approval information flows from PRs to issues automatically
+5. By default, PRs are **excluded from the report** but their approval data is preserved for issues
+
+**Usage scenarios:**
+
+**Scenario 1: Issues only (no PR data)**
+```bash
+# Filter explicitly excludes PRs, so no PR approval data is available
+python project_board_tracker.py --owner myorg --project 137 --filter 'milestone:"Release 1.10.5.8" is:issue' --format excel --output report.xlsx
+```
+- Report contains: Issues only
+- Approval data: From project board fields only
+
+**Scenario 2: Issues with PR approval data (recommended)**
+```bash
+# Filter includes PRs, but they're filtered from report output
+python project_board_tracker.py --owner myorg --project 137 --filter 'milestone:"Release 1.10.5.8"' --format excel --output report.xlsx
+```
+- Report contains: Issues only
+- Approval data: **Enriched with PR approver names**
+- PRs are fetched for approval data but not included in report
+
+**Scenario 3: Include PRs in report**
+```bash
+# Use --include-pr to show PRs as separate items
+python project_board_tracker.py --owner myorg --project 137 --filter 'milestone:"Release 1.10.5.8"' --include-pr --format excel --output report.xlsx
+```
+- Report contains: Issues AND Pull Requests
+- Approval data: Full PR approval information
+- PRs appear as separate rows with Source = "Pull Request"
+
+**Benefits:**
+- ✅ Automatic approval tracking from code reviews
+- ✅ No manual data entry needed for approvals
+- ✅ Accurate approver names from GitHub reviews
+- ✅ Flexible - use PRs for data enrichment or include them in reports
 
 ### Using Filters (Recommended)
 
@@ -110,7 +169,8 @@ Options:
   --owner OWNER         Repository owner (organization or user) [required]
   --repo REPO          Repository name (optional, for org-level projects)
   --project PROJECT    Project board number [required]
-  --filter FILTER      GitHub search query to filter items (e.g., 'milestone:"Release 1.10.5.8" -is:pr')
+  --filter FILTER      GitHub search query to filter items (e.g., 'milestone:"Release 1.10.5.8"')
+  --include-pr         Include pull requests in the report output (default: PRs excluded but used for approval data)
   --view VIEW          Project view number (optional, deprecated - use --filter instead)
   --format FORMAT      Output format: csv, markdown, or excel (default: csv)
   --output OUTPUT      Output file path (default: project_board_report.[format])
@@ -166,9 +226,11 @@ python project_board_tracker.py \
 
 **Features:**
 - 💾 **Smart Caching** - Extractions are cached in `.ai_cache/` to avoid re-processing
+- 🗂️ **Per-Project Cache Separation** - Cache files are organized by owner/project (e.g., `.ai_cache/myorg_137_extractions.json`)
 - ♻️ **Re-extraction** - Automatically re-extracts if issue is updated since last cache
 - 🏷️ **Source Annotation** - AI-extracted fields are marked with `[AI-Extracted]`
 - 💰 **Cost-Effective** - Uses gpt-4o-mini (~$0.0005 per issue, ~$0.50 for 1000 issues)
+- 🚫 **No Cache Conflicts** - Multiple projects can be tracked without cache key collisions
 
 **Example Output:**
 
@@ -225,8 +287,8 @@ Formatted Excel workbook with:
 |--------|-------------|
 | Issue ID | Requirement/Issue identifier (e.g., REQ-001) |
 | Title | Issue title |
-| Source | Type: Discussion or Issue |
-| GitHub Issue URL | Direct link to the GitHub issue |
+| Source | Type: Discussion, Issue, or Pull Request |
+| GitHub Issue URL | Direct link to the GitHub issue or PR |
 | Business Need | Business justification from issue body or custom field |
 | Acceptance Criteria | Success criteria from issue body or custom field |
 | Design Artifact(s) URL | Links to design documents |
@@ -238,9 +300,9 @@ Formatted Excel workbook with:
 | Priority | Priority level (High, Medium, Low, or from labels) |
 | Risk | Risk level (High, Medium, Low) |
 | Owner | Person responsible (from custom field or first assignee) |
-| Approvals: Product Owner | Product owner approval status |
-| Approvals: QA Lead | QA Lead approval status |
-| Approvals: Exec Sponsor | Executive sponsor approval status |
+| Approvals: Product Owner | Product owner approval status or PR approver names |
+| Approvals: QA Lead | QA Lead approval status or PR approver names |
+| Approvals: Exec Sponsor | Executive sponsor approval status or PR approver names |
 | Release Version | Target release version (e.g., 2025.9) |
 | Created Date | Issue creation date (YYYY-MM-DD format) |
 | Updated Date | Last update date (YYYY-MM-DD format) |
