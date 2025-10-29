@@ -16,11 +16,27 @@ import requests
 class ExtractionCache:
     """Cache AI extractions to avoid reprocessing and reduce API costs."""
     
-    def __init__(self, cache_dir: str = '.ai_cache'):
-        """Initialize cache with directory path."""
+    def __init__(self, cache_dir: str = '.ai_cache', owner: str = None, project: str = None):
+        """
+        Initialize cache with directory path and optional owner/project for separation.
+        
+        Args:
+            cache_dir: Directory for cache files
+            owner: Repository owner (org or user) for cache separation
+            project: Project identifier for cache separation
+        """
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
-        self.cache_file = self.cache_dir / 'extractions.json'
+        self.owner = owner
+        self.project = project
+        
+        # Create cache file name based on owner/project if provided
+        if owner and project:
+            cache_filename = f"{owner}_{project}_extractions.json"
+        else:
+            cache_filename = 'extractions.json'
+        
+        self.cache_file = self.cache_dir / cache_filename
         self.data = self._load()
     
     def _load(self) -> Dict[str, Any]:
@@ -38,18 +54,22 @@ class ExtractionCache:
         with open(self.cache_file, 'w', encoding='utf-8') as f:
             json.dump(self.data, f, indent=2)
     
-    def get(self, issue_number: int, issue_updated_at: str = None) -> Optional[Dict[str, Any]]:
+    def get(self, issue_number: int, repo_owner: str, repo_name: str, 
+            issue_updated_at: str = None) -> Optional[Dict[str, Any]]:
         """
-        Get cached extraction by issue number.
+        Get cached extraction by issue number and repository.
         
         Args:
             issue_number: GitHub issue number
+            repo_owner: Repository owner
+            repo_name: Repository name
             issue_updated_at: ISO timestamp of when issue was last updated
             
         Returns:
             Cached extraction if valid, None otherwise
         """
-        key = str(issue_number)
+        # Use composite key: owner/repo#number
+        key = f"{repo_owner}/{repo_name}#{issue_number}"
         if key not in self.data:
             return None
         
@@ -63,18 +83,23 @@ class ExtractionCache:
         
         return cached.get('fields')
     
-    def set(self, issue_number: int, extracted_fields: Dict[str, str], 
-            model: str, issue_updated_at: str = None):
+    def set(self, issue_number: int, repo_owner: str, repo_name: str,
+            extracted_fields: Dict[str, str], model: str, 
+            issue_updated_at: str = None):
         """
         Cache extraction result.
         
         Args:
             issue_number: GitHub issue number
+            repo_owner: Repository owner
+            repo_name: Repository name
             extracted_fields: Extracted field values
             model: Model used for extraction
             issue_updated_at: ISO timestamp of when issue was last updated
         """
-        self.data[str(issue_number)] = {
+        # Use composite key: owner/repo#number
+        key = f"{repo_owner}/{repo_name}#{issue_number}"
+        self.data[key] = {
             'fields': extracted_fields,
             'timestamp': datetime.now().isoformat(),
             'model': model,
@@ -87,7 +112,8 @@ class AIFieldExtractor:
     """Extracts structured fields from GitHub issue content using Azure OpenAI."""
     
     def __init__(self, endpoint: str, api_key: str, deployment: str = 'gpt-4.1-mini', 
-                 cache_dir: str = '.ai_cache', github_token: str = None):
+                 cache_dir: str = '.ai_cache', github_token: str = None,
+                 owner: str = None, project: str = None):
         """
         Initialize the AI field extractor.
         
@@ -97,11 +123,13 @@ class AIFieldExtractor:
             deployment: Deployment name (included in endpoint)
             cache_dir: Directory for caching extractions
             github_token: GitHub token for fetching issue content
+            owner: Repository owner (org or user) for cache separation
+            project: Project identifier for cache separation
         """
         self.endpoint = endpoint
         self.api_key = api_key
         self.deployment = deployment
-        self.cache = ExtractionCache(cache_dir)
+        self.cache = ExtractionCache(cache_dir, owner, project)
         self.github_token = github_token
     
     def extract_fields(self, issue_data: Dict[str, Any], repo_owner: str, 
@@ -121,7 +149,7 @@ class AIFieldExtractor:
         issue_updated_at = issue_data.get('updatedAt') or issue_data.get('updated_at')
         
         # Check cache first
-        if cached := self.cache.get(issue_number, issue_updated_at):
+        if cached := self.cache.get(issue_number, repo_owner, repo_name, issue_updated_at):
             print(f"  Using cached extraction for issue #{issue_number}")
             return self._annotate_fields(cached)
         
@@ -144,7 +172,7 @@ class AIFieldExtractor:
         extracted = self._parse_response(response)
         
         # Cache result
-        self.cache.set(issue_number, extracted, self.deployment, issue_updated_at)
+        self.cache.set(issue_number, repo_owner, repo_name, extracted, self.deployment, issue_updated_at)
         
         return self._annotate_fields(extracted)
     
